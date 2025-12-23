@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import GameShell from "@/components/GameShell";
 
 export default function GameRoomPage({
@@ -14,5 +15,9 @@ export default function GameRoomPage({
     mode: typeof searchParams.mode === "string" ? searchParams.mode : undefined,
     difficulty: typeof searchParams.difficulty === "string" ? searchParams.difficulty : undefined
   };
-  return <GameShell roomId={params.room} presetFromQuery={preset} />;
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-slate/70">Loading...</div>}>
+      <GameShell roomId={params.room} presetFromQuery={preset} />
+    </Suspense>
+  );
 }
