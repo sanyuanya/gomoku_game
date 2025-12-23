@@ -1,0 +1,20 @@
+{
+  "name": "fork_double_live_four_after_one_move",
+  "size": 15,
+  "player": 2,
+  "moves": [
+    { "x": 7, "y": 7, "player": 1 },
+    { "x": 6, "y": 6, "player": 2 },
+    { "x": 8, "y": 6, "player": 1 },
+    { "x": 5, "y": 7, "player": 2 },
+    { "x": 9, "y": 6, "player": 1 },
+    { "x": 6, "y": 8, "player": 2 },
+    { "x": 10, "y": 6, "player": 1 },
+    { "x": 7, "y": 8, "player": 2 }
+  ],
+  "forkPoint": { "x": 8, "y": 8 },
+  "expectedLiveFourPoints": [
+    { "x": 6, "y": 8 },
+    { "x": 10, "y": 8 }
+  ]
+}

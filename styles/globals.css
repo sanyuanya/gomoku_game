@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  background: radial-gradient(circle at top, #f8f1e3 0%, #efe7d6 45%, #e1d6c2 100%);
+  color: #1c1b18;
+}
+
+main {
+  min-height: 100vh;
+}
+
+.game-grid {
+  background-image: linear-gradient(120deg, rgba(200, 163, 95, 0.08) 0%, rgba(60, 72, 86, 0.05) 100%);
+}
+
+.panel-surface {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(200, 163, 95, 0.25);
+}
+
+.canvas-frame {
+  background: linear-gradient(145deg, #f1e6d2, #e4d4b9);
+  border: 1px solid rgba(60, 72, 86, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+.drawer-overlay {
+  background: rgba(28, 27, 24, 0.5);
+  backdrop-filter: blur(6px);
+}
+
+.motion-in {
+  animation: fadeUp 400ms ease-out;
+}

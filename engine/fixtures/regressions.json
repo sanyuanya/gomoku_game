@@ -1,0 +1,85 @@
+[
+  {
+    "name": "win_in_one_horizontal",
+    "size": 15,
+    "player": 1,
+    "moves": [
+      { "x": 7, "y": 7, "player": 1 },
+      { "x": 7, "y": 8, "player": 2 },
+      { "x": 8, "y": 7, "player": 1 },
+      { "x": 8, "y": 8, "player": 2 },
+      { "x": 9, "y": 7, "player": 1 },
+      { "x": 9, "y": 8, "player": 2 },
+      { "x": 10, "y": 7, "player": 1 }
+    ],
+    "expectedAny": [{ "x": 6, "y": 7 }, { "x": 11, "y": 7 }],
+    "goal": "Bot must finish the five immediately."
+  },
+  {
+    "name": "block_opponent_five_vertical",
+    "size": 15,
+    "player": 1,
+    "moves": [
+      { "x": 5, "y": 5, "player": 2 },
+      { "x": 6, "y": 6, "player": 1 },
+      { "x": 5, "y": 6, "player": 2 },
+      { "x": 6, "y": 7, "player": 1 },
+      { "x": 5, "y": 7, "player": 2 },
+      { "x": 6, "y": 8, "player": 1 },
+      { "x": 5, "y": 8, "player": 2 }
+    ],
+    "expectedAny": [{ "x": 5, "y": 4 }, { "x": 5, "y": 9 }],
+    "goal": "Bot must block white's one-step win."
+  },
+  {
+    "name": "block_live_four_open",
+    "size": 15,
+    "player": 1,
+    "moves": [
+      { "x": 3, "y": 4, "player": 2 },
+      { "x": 8, "y": 8, "player": 1 },
+      { "x": 4, "y": 4, "player": 2 },
+      { "x": 9, "y": 8, "player": 1 },
+      { "x": 5, "y": 4, "player": 2 },
+      { "x": 10, "y": 8, "player": 1 },
+      { "x": 6, "y": 4, "player": 2 }
+    ],
+    "expectedAny": [{ "x": 2, "y": 4 }, { "x": 7, "y": 4 }],
+    "goal": "Bot must block white live four, not play elsewhere."
+  },
+  {
+    "name": "vcf_rush_four_start",
+    "size": 15,
+    "player": 1,
+    "moves": [
+      { "x": 7, "y": 7, "player": 1 },
+      { "x": 7, "y": 8, "player": 2 },
+      { "x": 8, "y": 7, "player": 1 },
+      { "x": 8, "y": 8, "player": 2 },
+      { "x": 9, "y": 7, "player": 1 },
+      { "x": 6, "y": 7, "player": 1 },
+      { "x": 10, "y": 6, "player": 2 },
+      { "x": 10, "y": 8, "player": 2 }
+    ],
+    "expectedAny": [{ "x": 10, "y": 7 }],
+    "goal": "Hard mode should start rush-four VCF at (10,7)."
+  },
+  {
+    "name": "four_three_defense",
+    "size": 15,
+    "player": 2,
+    "moves": [
+      { "x": 6, "y": 6, "player": 1 },
+      { "x": 7, "y": 6, "player": 2 },
+      { "x": 7, "y": 7, "player": 1 },
+      { "x": 8, "y": 6, "player": 2 },
+      { "x": 8, "y": 8, "player": 1 },
+      { "x": 9, "y": 6, "player": 2 },
+      { "x": 6, "y": 7, "player": 1 },
+      { "x": 7, "y": 8, "player": 2 },
+      { "x": 8, "y": 7, "player": 1 }
+    ],
+    "expectedAny": [{ "x": 7, "y": 5 }],
+    "goal": "Bot (white) must stop black's four-three combo by playing 7,5."
+  }
+]

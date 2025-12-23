@@ -1,0 +1,12 @@
+{
+  "name": "double_live_three_pivot",
+  "size": 15,
+  "player": 2,
+  "moves": [
+    { "x": 7, "y": 5, "player": 1 },
+    { "x": 7, "y": 6, "player": 1 },
+    { "x": 5, "y": 7, "player": 1 },
+    { "x": 6, "y": 7, "player": 1 }
+  ],
+  "expectedAny": [ { "x": 7, "y": 7 } ]
+}

@@ -1,0 +1,18 @@
+import { createBoard, setCell } from '../rules';
+import { searchBestMove } from '../search';
+import type { Player } from '../types';
+
+const data = {"size":15,"moves":[{"x":7,"y":7,"player":1,"index":96,"moveNumber":1,"ts":1766480188858},{"x":6,"y":6,"player":2,"index":80,"moveNumber":2,"ts":1766480230503},{"x":6,"y":5,"player":1,"index":65,"moveNumber":3,"ts":1766480231708},{"x":7,"y":5,"player":2,"index":66,"moveNumber":4,"ts":1766480237457},{"x":8,"y":4,"player":1,"index":52,"moveNumber":5,"ts":1766480237464},{"x":8,"y":6,"player":2,"index":82,"moveNumber":6,"ts":1766480243256},{"x":9,"y":7,"player":1,"index":98,"moveNumber":7,"ts":1766480243263},{"x":8,"y":7,"player":2,"index":97,"moveNumber":8,"ts":1766480250778},{"x":8,"y":9,"player":1,"index":127,"moveNumber":9,"ts":1766480250786},{"x":9,"y":6,"player":2,"index":83,"moveNumber":10,"ts":1766480260271},{"x":7,"y":6,"player":1,"index":81,"moveNumber":11,"ts":1766480260284},{"x":7,"y":8,"player":2,"index":111,"moveNumber":12,"ts":1766480266052},{"x":6,"y":9,"player":1,"index":125,"moveNumber":13,"ts":1766480266060},{"x":10,"y":6,"player":2,"index":84,"moveNumber":14,"ts":1766480272595},{"x":10,"y":5,"player":1,"index":69,"moveNumber":15,"ts":1766480272606},{"x":5,"y":8,"player":2,"index":109,"moveNumber":16,"ts":1766480281056},{"x":11,"y":6,"player":1,"index":85,"moveNumber":17,"ts":1766480281067},{"x":5,"y":7,"player":2,"index":94,"moveNumber":18,"ts":1766480287596},{"x":4,"y":8,"player":1,"index":108,"moveNumber":19,"ts":1766480287612},{"x":5,"y":9,"player":2,"index":124,"moveNumber":20,"ts":1766480295302},{"x":5,"y":6,"player":1,"index":79,"moveNumber":21,"ts":1766480295314},{"x":7,"y":4,"player":2,"index":51,"moveNumber":22,"ts":1766480302573},{"x":5,"y":10,"player":1,"index":139,"moveNumber":23,"ts":1766480302589},{"x":11,"y":7,"player":2,"index":100,"moveNumber":24,"ts":1766480310957},{"x":10,"y":7,"player":1,"index":99,"moveNumber":25,"ts":1766480310974},{"x":9,"y":8,"player":2,"index":113,"moveNumber":26,"ts":1766480319314},{"x":6,"y":8,"player":1,"index":110,"moveNumber":27,"ts":1766480319330},{"x":6,"y":11,"player":2,"index":155,"moveNumber":28,"ts":1766480327634},{"x":13,"y":9,"player":1,"index":132,"moveNumber":29,"ts":1766480327657},{"x":12,"y":7,"player":2,"index":101,"moveNumber":30,"ts":1766480343224},{"x":8,"y":5,"player":1,"index":67,"moveNumber":31,"ts":1766480344444},{"x":11,"y":8,"player":2,"index":115,"moveNumber":32,"ts":1766480353080},{"x":8,"y":8,"player":1,"index":112,"moveNumber":33,"ts":1766480353101},{"x":10,"y":9,"player":2,"index":129,"moveNumber":34,"ts":1766480363273},{"x":9,"y":10,"player":1,"index":143,"moveNumber":35,"ts":1766480363294},{"x":12,"y":8,"player":2,"index":116,"moveNumber":36,"ts":1766480371653},{"x":10,"y":8,"player":1,"index":114,"moveNumber":37,"ts":1766480371674},{"x":13,"y":7,"player":2,"index":102,"moveNumber":38,"ts":1766480379331},{"x":11,"y":10,"player":1,"index":145,"moveNumber":39,"ts":1766480379352},{"x":13,"y":6,"player":2,"index":87,"moveNumber":40,"ts":1766480390586},{"x":14,"y":5,"player":1,"index":73,"moveNumber":41,"ts":1766480390608},{"x":14,"y":7,"player":2,"index":103,"moveNumber":42,"ts":1766480397022},{"x":15,"y":7,"player":1,"index":104,"moveNumber":43,"ts":1766480397041},{"x":12,"y":5,"player":2,"index":71,"moveNumber":44,"ts":1766480405195},{"x":12,"y":6,"player":1,"index":86,"moveNumber":45,"ts":1766480405217}],"startPlayer":1};
+
+const size = data.size as 15 | 19;
+const board = createBoard(size);
+for (const m of data.moves) {
+  setCell(board, size, m.x, m.y, m.player as Player);
+}
+const res = searchBestMove(board, size, data.startPlayer as Player, {
+  maxDepth: 4,
+  timeBudgetMs: 1200,
+  useIterative: true,
+  difficulty: 'hard'
+});
+console.log(res);
