@@ -1,5 +1,3 @@
- "use client";
-
 "use client";
 
 import Link from "next/link";
@@ -11,19 +9,19 @@ const templates = [
     id: "classic",
     title: "Classic 15x15",
     description: "Standard board, Human vs Bot (Hard).",
-    path: "/game/classic?mode=human-bot&difficulty=hard&size=15"
+    path: "/game?room=classic&mode=human-bot&difficulty=hard&size=15"
   },
   {
     id: "arena",
     title: "Arena 19x19",
     description: "Big board, Human vs Human.",
-    path: "/game/arena?mode=human-human&size=19"
+    path: "/game?room=arena&mode=human-human&size=19"
   },
   {
     id: "practice",
     title: "Practice",
     description: "Sandbox with threats on, Normal bot.",
-    path: "/game/practice?mode=practice&difficulty=normal&size=15"
+    path: "/game?room=practice&mode=practice&difficulty=normal&size=15"
   }
 ];
 
@@ -59,7 +57,7 @@ export default function HomePage() {
             </p>
           </div>
           <Link
-            href="/game/default"
+            href="/game?room=default"
             className="rounded-lg border border-gold/60 px-4 py-2 text-sm bg-gold/20 hover:bg-gold/30 transition"
           >
             Quick Start
@@ -116,13 +114,13 @@ export default function HomePage() {
             />
             <div className="grid gap-2">
               <Link
-                href={`/game/${encodeURIComponent(targetRoom)}`}
+                href={`/game?room=${encodeURIComponent(targetRoom)}`}
                 className="rounded-lg bg-ember text-white px-3 py-2 text-sm text-center shadow hover:shadow-lg transition"
               >
                 Enter Room
               </Link>
               <Link
-                href={`/game/${encodeURIComponent(targetRoom)}?mode=human-bot&difficulty=hard&size=15`}
+                href={`/game?room=${encodeURIComponent(targetRoom)}&mode=human-bot&difficulty=hard&size=15`}
                 className="rounded-lg border border-gold/50 bg-gold/20 px-3 py-2 text-sm text-center hover:bg-gold/30 transition"
               >
                 Enter as Classic vs Bot

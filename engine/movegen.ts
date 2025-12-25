@@ -2,6 +2,7 @@ import { DIRECTIONS, NEAR_DISTANCE, THREAT_SCORES, TOPK_COUNT } from "./constant
 import type { Candidate, Player, ThreatType, Difficulty } from "./types";
 import { getCell, inBounds, otherPlayer } from "./rules";
 import {
+  evaluateMovePatternScore,
   getImmediateBlocks,
   getImmediateWins,
   getMustBlockCellsForOpponentThreat,
@@ -11,63 +12,15 @@ import {
   getFourCreationPoints,
   findForkThreatMovesForOpponent,
   findForkPivotsForOpponent,
-  findDoubleLiveThreePivotsForOpponent
+  findDoubleLiveThreePivotsForOpponent,
+  findComboThreatPivots,
+  findTwoStepThreatSetups,
+  countImmediateStrongThreats
 } from "./threat";
-
-const countDir = (
-  board: ArrayLike<number>,
-  size: number,
-  x: number,
-  y: number,
-  dx: number,
-  dy: number,
-  player: Player
-) => {
-  let count = 0;
-  let cx = x + dx;
-  let cy = y + dy;
-  while (inBounds(cx, cy, size) && getCell(board, size, cx, cy) === player) {
-    count += 1;
-    cx += dx;
-    cy += dy;
-  }
-  return count;
-};
-
-const openEnd = (
-  board: ArrayLike<number>,
-  size: number,
-  x: number,
-  y: number,
-  dx: number,
-  dy: number,
-  count: number
-) => {
-  const cx = x + (count + 1) * dx;
-  const cy = y + (count + 1) * dy;
-  if (!inBounds(cx, cy, size)) return false;
-  return getCell(board, size, cx, cy) === 0;
-};
-
-const classify = (
-  total: number,
-  openEnds: number
-): ThreatType | null => {
-  if (total >= 5) return "FIVE";
-  if (total === 4 && openEnds === 2) return "LIVE_FOUR";
-  if (total === 4 && openEnds === 1) return "RUSH_FOUR";
-  if (total === 3 && openEnds === 2) return "LIVE_THREE";
-  if (total === 3 && openEnds === 1) return "SLEEP_THREE";
-  if (total === 2 && openEnds === 2) return "LIVE_TWO";
-  if (total === 2 && openEnds === 1) return "SLEEP_TWO";
-  return null;
-};
 
 type PatternEval = {
   type: ThreatType | null;
   score: number;
-  openEnds: number;
-  total: number;
 };
 
 const evaluatePoint = (
@@ -77,27 +30,12 @@ const evaluatePoint = (
   y: number,
   player: Player
 ) => {
-  let totalScore = 0;
-  let best: PatternEval = { type: null, score: 0, openEnds: 0, total: 0 };
-  let secondBestScore = 0;
-  for (const { dx, dy } of DIRECTIONS) {
-    const left = countDir(board, size, x, y, -dx, -dy, player);
-    const right = countDir(board, size, x, y, dx, dy, player);
-    const total = left + right + 1;
-    const openEnds =
-      (openEnd(board, size, x, y, -dx, -dy, left) ? 1 : 0) +
-      (openEnd(board, size, x, y, dx, dy, right) ? 1 : 0);
-    const type = classify(total, openEnds);
-    const score = type ? THREAT_SCORES[type] : 0;
-    totalScore += score;
-    if (score > best.score) {
-      secondBestScore = best.score;
-      best = { type, score, openEnds, total };
-    } else if (score > secondBestScore) {
-      secondBestScore = score;
-    }
-  }
-  return { totalScore, best, secondBestScore };
+  const result = evaluateMovePatternScore(board, size, x, y, player);
+  return {
+    totalScore: result.totalScore,
+    best: result.best,
+    secondBestScore: result.secondBestScore
+  };
 };
 
 const hasNeighbor = (
@@ -119,11 +57,10 @@ const hasNeighbor = (
   return false;
 };
 
-const difficultyLimit = (difficulty?: Difficulty) => {
-  if (difficulty === "hard") return 18;
-  if (difficulty === "normal") return 14;
-  if (difficulty === "easy") return 10;
-  return 16;
+const difficultyLimit = (difficulty?: Difficulty, precise?: boolean) => {
+  const base =
+    difficulty === "hard" ? 18 : difficulty === "normal" ? 14 : difficulty === "easy" ? 10 : 16;
+  return precise ? base + 8 : base;
 };
 
 const reasonFromPattern = (
@@ -147,17 +84,18 @@ export const generateCandidates = (
   board: ArrayLike<number>,
   size: number,
   player: Player,
-  opts?: { difficulty?: Difficulty; limit?: number }
+  opts?: { difficulty?: Difficulty; limit?: number; precise?: boolean }
 ): Candidate[] => {
   const forced: Candidate[] = [];
   const tactical: Candidate[] = [];
   const positional: Candidate[] = [];
 
   let hasAnyStone = false;
+  let stoneCount = 0;
   for (let i = 0; i < board.length; i += 1) {
     if (board[i] !== 0) {
       hasAnyStone = true;
-      break;
+      stoneCount += 1;
     }
   }
 
@@ -185,6 +123,43 @@ export const generateCandidates = (
   const forkBlocks = findForkThreatMovesForOpponent(board, size, player);
   const forkPivots = findForkPivotsForOpponent(board, size, player);
   const doubleLiveThreePivots = findDoubleLiveThreePivotsForOpponent(board, size, player);
+  const oppComboPivots = findComboThreatPivots(board, size, otherPlayer(player));
+  const selfComboPivots = findComboThreatPivots(board, size, player);
+  const oppSetupMoves = findTwoStepThreatSetups(board, size, otherPlayer(player));
+  const selfSetupMoves = findTwoStepThreatSetups(board, size, player);
+  const quietBoard =
+    countImmediateStrongThreats(board, size, player) +
+      countImmediateStrongThreats(board, size, otherPlayer(player)) ===
+    0;
+  const openingThreshold = size === 19 ? 14 : 10;
+  const useOpeningBlockBias = quietBoard && stoneCount <= openingThreshold;
+
+  const multiLineBlockScore = (x: number, y: number, target: Player) => {
+    const scores: number[] = [];
+    for (const { dx, dy } of DIRECTIONS) {
+      let dirScore = 0;
+      for (const sign of [1, -1]) {
+        for (let step = 1; step <= 4; step += 1) {
+          const nx = x + dx * step * sign;
+          const ny = y + dy * step * sign;
+          if (!inBounds(nx, ny, size)) break;
+          const val = getCell(board, size, nx, ny);
+          if (val === target) {
+            dirScore += 5 - step;
+            continue;
+          }
+          if (val !== 0) break;
+        }
+      }
+      scores.push(dirScore);
+    }
+    scores.sort((a, b) => b - a);
+    const topA = scores[0] ?? 0;
+    const topB = scores[1] ?? 0;
+    let total = topA + topB;
+    if (topA >= 6 && topB >= 6) total += 4;
+    return total;
+  };
 
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
@@ -193,9 +168,16 @@ export const generateCandidates = (
 
       const selfEval = evaluatePoint(board, size, x, y, player);
       const oppEval = evaluatePoint(board, size, x, y, otherPlayer(player));
-      const combinedScore =
+      let combinedScore =
         selfEval.totalScore + oppEval.totalScore * 0.9 + selfEval.secondBestScore * 0.3;
-      const reason = reasonFromPattern(selfEval.best, oppEval.best);
+      let reason = reasonFromPattern(selfEval.best, oppEval.best);
+      const multiLineScore = useOpeningBlockBias
+        ? multiLineBlockScore(x, y, otherPlayer(player))
+        : 0;
+      if (multiLineScore > 0) {
+        combinedScore += multiLineScore * 45;
+        if (!reason && multiLineScore >= 8) reason = "block_multi_line";
+      }
 
       const candidate: Candidate = {
         x,
@@ -225,6 +207,17 @@ export const generateCandidates = (
           ...candidate,
           score: isSelfFour ? THREAT_SCORES.LIVE_FOUR : THREAT_SCORES.LIVE_FOUR - 10,
           reason: isSelfFour ? (selfType === "LIVE_FOUR" ? "create_live_four" : "create_rush_four") : oppType === "LIVE_FOUR" ? "block_live_four" : "block_rush_four"
+        });
+        continue;
+      }
+
+      const isSelfCombo = selfComboPivots.some((c) => c.x === x && c.y === y);
+      const isOppCombo = oppComboPivots.some((c) => c.x === x && c.y === y);
+      if (isSelfCombo || isOppCombo) {
+        forced.push({
+          ...candidate,
+          score: THREAT_SCORES.LIVE_FOUR + THREAT_SCORES.LIVE_THREE - (isOppCombo ? 100 : 0),
+          reason: isSelfCombo ? "four_three" : "block_four_three"
         });
         continue;
       }
@@ -269,6 +262,18 @@ export const generateCandidates = (
         continue;
       }
 
+      const isSelfSetup = selfSetupMoves.some((c) => c.x === x && c.y === y);
+      const isOppSetup = oppSetupMoves.some((c) => c.x === x && c.y === y);
+      if (isSelfSetup || isOppSetup) {
+        const setupBonus = isSelfSetup ? 700 : 500;
+        tactical.push({
+          ...candidate,
+          score: combinedScore + setupBonus,
+          reason: isSelfSetup ? "setup_combo" : "block_setup_combo"
+        });
+        continue;
+      }
+
       const isTacticalSelf = selfType === "LIVE_THREE" || selfType === "SLEEP_THREE";
       const isTacticalOpp = oppType === "LIVE_THREE" || oppType === "SLEEP_THREE";
       const hasDoubleThreat = selfEval.secondBestScore >= THREAT_SCORES.SLEEP_THREE;
@@ -281,15 +286,40 @@ export const generateCandidates = (
         continue;
       }
 
+      if (multiLineScore >= 8) {
+        tactical.push({
+          ...candidate,
+          score: combinedScore + 300,
+          reason: reason ?? "block_multi_line"
+        });
+        continue;
+      }
+
       positional.push(candidate);
     }
   }
 
   if (forced.length) {
-    return forced.sort((a, b) => b.score - a.score);
+    const sortedForced = forced.sort((a, b) => b.score - a.score);
+    const limit = opts?.limit ?? difficultyLimit(opts?.difficulty, opts?.precise);
+    const extraLimit = opts?.precise ? Math.min(10, limit) : Math.min(6, limit);
+    const extras: Candidate[] = [];
+    const used = new Set(sortedForced.map((c) => `${c.x},${c.y}`));
+    const addExtras = (pool: Candidate[]) => {
+      for (const move of pool) {
+        if (extras.length >= extraLimit) break;
+        const key = `${move.x},${move.y}`;
+        if (used.has(key)) continue;
+        used.add(key);
+        extras.push(move);
+      }
+    };
+    addExtras(tactical.sort((a, b) => b.score - a.score));
+    addExtras(positional.sort((a, b) => b.score - a.score));
+    return sortedForced.concat(extras);
   }
 
-  const limit = opts?.limit ?? difficultyLimit(opts?.difficulty);
+  const limit = opts?.limit ?? difficultyLimit(opts?.difficulty, opts?.precise);
   const sortedTactical = tactical.sort((a, b) => b.score - a.score);
   const sortedPositional = positional.sort((a, b) => b.score - a.score);
 

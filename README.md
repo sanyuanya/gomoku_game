@@ -21,10 +21,12 @@ Open `http://localhost:3000`.
 
 - **Easy**: rule-based top picks with forced win/block pre-check.
 - **Normal**: alpha-beta (depth 2-3) + forced tactics pre-search.
-- **Hard**: iterative deepening alpha-beta with time budget (slider), killer/history ordering, quiescence, VCF rush-four probe, and Zobrist TT.
-- Candidate generation is layered: forced (win/block/four), tactical (live/jump three, double threats), then best-scored within distance ≤2. Strict caps per difficulty keep depth higher.
+- **Hard**: iterative deepening alpha-beta with time budget (slider), killer/history ordering, quiescence, VCF rush-four probe, Zobrist TT, and exact endgame search when few empties remain.
+- **Precise mode (toggle)**: deeper/wider search, threat-line extensions near the horizon, a defensive VCF/VCT safety scan, larger quiescence set, and a slightly larger exact-endgame window. It increases thinking time and is still bounded (not full-board exhaustive).
+- **Precision depth + Safety scan depth sliders** (shown when Precise mode is on) let you raise search depth and how far the bot looks for forced losses (e.g. 10 = ~5-ply defensive scan).
+- Candidate generation is layered: forced (win/block/four), tactical (live/jump three, combo setups), then best-scored within distance ≤2. In quiet openings it adds a small bias to block multi-direction lines.
 
-The bot returns bestMove, topK (with reasons like `block_five`, `create_live_four`, `vcf_four`), and key threat routes for UI overlays.
+The bot returns bestMove, topK (with reasons like `block_five`, `create_live_four`, `vcf_four`), key threat routes, and an approximate main line shown in the Analysis panel.
 
 ## Controls
 
@@ -45,7 +47,8 @@ The bot returns bestMove, topK (with reasons like `block_five`, `create_live_fou
 - Threat routes are heuristic and optimized for clarity, not a full tactical proof search.
 - The evaluation is tuned for speed, not tournament strength.
 - VCT search is simplified (VCF + four-three awareness); pathological ladder traps may still slip through.
+- Precise mode expands search but does not brute-force the full early game tree.
 
 ## Regression snippets (manual)
 
-See `engine/fixtures/regressions.json` for 5 frozen scenarios (win-in-one, block-five, block live-four, rush-four VCF start, four-three defense). Load moves manually via Replay import/export or code to ensure the bot chooses any in `expectedAny`.
+See `engine/fixtures/regressions.json` for 6 frozen scenarios (win-in-one, block-five, block live-four, rush-four VCF start, four-three defense, four-three pivot). Load moves manually via Replay import/export or code to ensure the bot chooses any in `expectedAny`.

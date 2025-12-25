@@ -51,6 +51,8 @@ export default function SidePanel({
     if (isDraw) return t("draw");
     return t("inPlay");
   };
+  const precisionDepthRange = settings.boardSize === 19 ? { min: 6, max: 12 } : { min: 8, max: 14 };
+  const safetyDepthRange = { min: 4, max: 12 };
 
   return (
     <div className="panel-surface rounded-2xl shadow-panel p-4 flex flex-col gap-4">
@@ -112,6 +114,53 @@ export default function SidePanel({
               onSettingsChange({
                 ...settings,
                 timeBudgetMs: Number(event.target.value)
+              })
+            }
+          />
+        )}
+
+        {settings.mode === "human-bot" && (
+          <Switch
+            label={t("precision")}
+            checked={settings.precisionMode}
+            onChange={(event) =>
+              onSettingsChange({
+                ...settings,
+                precisionMode: event.target.checked
+              })
+            }
+          />
+        )}
+
+        {settings.mode === "human-bot" && settings.precisionMode && (
+          <Slider
+            label={t("precisionDepth")}
+            min={precisionDepthRange.min}
+            max={precisionDepthRange.max}
+            step={1}
+            value={settings.precisionDepth}
+            valueLabel={`${settings.precisionDepth}`}
+            onChange={(event) =>
+              onSettingsChange({
+                ...settings,
+                precisionDepth: Number(event.target.value)
+              })
+            }
+          />
+        )}
+
+        {settings.mode === "human-bot" && settings.precisionMode && (
+          <Slider
+            label={t("safetyDepth")}
+            min={safetyDepthRange.min}
+            max={safetyDepthRange.max}
+            step={1}
+            value={settings.safetyDepth}
+            valueLabel={`${settings.safetyDepth}`}
+            onChange={(event) =>
+              onSettingsChange({
+                ...settings,
+                safetyDepth: Number(event.target.value)
               })
             }
           />

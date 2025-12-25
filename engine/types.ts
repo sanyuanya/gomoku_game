@@ -57,10 +57,17 @@ export type Candidate = {
   reason?: string;
 };
 
+export type PVStep = {
+  x: number;
+  y: number;
+  player: Player;
+};
+
 export type BotResult = {
   bestMove: Candidate;
   topK: Candidate[];
   keyThreats: ThreatRoute[];
+  pv?: PVStep[];
   depth: number;
   nodes: number;
   durationMs: number;
@@ -75,6 +82,9 @@ export type Settings = {
   forbiddenMoves: boolean;
   showThreats: boolean;
   timeBudgetMs: number;
+  precisionMode: boolean;
+  precisionDepth: number;
+  safetyDepth: number;
 };
 
 export type ReplaySnapshot = {
@@ -95,4 +105,7 @@ export type BotRequest = {
   player: Player;
   difficulty: Difficulty;
   timeBudgetMs: number;
+  precisionMode: boolean;
+  precisionDepth: number;
+  safetyDepth: number;
 };

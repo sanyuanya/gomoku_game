@@ -1,4 +1,4 @@
-import type { BoardSize, Candidate, Difficulty, Player } from "./types";
+import type { BoardSize, Candidate, Difficulty, Player, PVStep } from "./types";
 import { generateCandidates } from "./movegen";
 import { evaluateBoard } from "./eval";
 import { createZobrist, hashBoard, updateHash } from "./zobrist";
@@ -14,6 +14,9 @@ import {
   findForkThreatMovesForOpponent,
   findForkPivotsForOpponent,
   findDoubleLiveThreePivotsForOpponent,
+  findComboThreatPivots,
+  findTwoStepThreatSetups,
+  evaluateMovePatternScore,
   countImmediateStrongThreats,
   scanThreatRoutes
 } from "./threat";
@@ -21,6 +24,7 @@ import { DIRECTIONS, THREAT_SCORES } from "./constants";
 
 const WIN_SCORE = 1000000;
 const TURN_SALT = [0x9e3779b9, 0x85ebca6b];
+const ENDGAME_EMPTY_LIMIT = 10;
 
 type TTEntry = {
   depth: number;
@@ -34,6 +38,8 @@ type SearchOptions = {
   timeBudgetMs?: number;
   useIterative?: boolean;
   difficulty?: Difficulty;
+  precise?: boolean;
+  safetyDepth?: number;
 };
 
 const isImmediateWin = (
@@ -71,31 +77,8 @@ const classifyFour = (
   y: number,
   player: Player
 ) => {
-  // Returns true if placing here creates live/ rush four.
-  for (const { dx, dy } of DIRECTIONS) {
-    let left = 0;
-    let right = 0;
-    let cx = x - dx;
-    let cy = y - dy;
-    while (inBounds(cx, cy, size) && getCell(board, size, cx, cy) === player) {
-      left += 1;
-      cx -= dx;
-      cy -= dy;
-    }
-    const leftOpen = inBounds(cx, cy, size) && getCell(board, size, cx, cy) === 0;
-    cx = x + dx;
-    cy = y + dy;
-    while (inBounds(cx, cy, size) && getCell(board, size, cx, cy) === player) {
-      right += 1;
-      cx += dx;
-      cy += dy;
-    }
-    const rightOpen = inBounds(cx, cy, size) && getCell(board, size, cx, cy) === 0;
-    const total = left + right + 1;
-    const opens = (leftOpen ? 1 : 0) + (rightOpen ? 1 : 0);
-    if (total === 4 && opens >= 1) return true;
-  }
-  return false;
+  const result = evaluateMovePatternScore(board, size, x, y, player);
+  return result.best.type === "LIVE_FOUR" || result.best.type === "RUSH_FOUR";
 };
 
 const isThreateningThree = (
@@ -105,30 +88,8 @@ const isThreateningThree = (
   y: number,
   player: Player
 ) => {
-  for (const { dx, dy } of DIRECTIONS) {
-    let left = 0;
-    let right = 0;
-    let cx = x - dx;
-    let cy = y - dy;
-    while (inBounds(cx, cy, size) && getCell(board, size, cx, cy) === player) {
-      left += 1;
-      cx -= dx;
-      cy -= dy;
-    }
-    const leftOpen = inBounds(cx, cy, size) && getCell(board, size, cx, cy) === 0;
-    cx = x + dx;
-    cy = y + dy;
-    while (inBounds(cx, cy, size) && getCell(board, size, cx, cy) === player) {
-      right += 1;
-      cx += dx;
-      cy += dy;
-    }
-    const rightOpen = inBounds(cx, cy, size) && getCell(board, size, cx, cy) === 0;
-    const total = left + right + 1;
-    const opens = (leftOpen ? 1 : 0) + (rightOpen ? 1 : 0);
-    if (total === 3 && opens === 2) return true;
-  }
-  return false;
+  const result = evaluateMovePatternScore(board, size, x, y, player);
+  return result.best.type === "LIVE_THREE";
 };
 
 export const searchBestMove = (
@@ -150,6 +111,14 @@ export const searchBestMove = (
   let nodes = 0;
   let aborted = false;
   const deadline = options.timeBudgetMs ? start + options.timeBudgetMs : Infinity;
+  let emptyCount = 0;
+  for (let i = 0; i < board.length; i += 1) {
+    if (board[i] === 0) emptyCount += 1;
+  }
+  const baseEndgameLimit =
+    size === 19 ? Math.min(ENDGAME_EMPTY_LIMIT, 8) : ENDGAME_EMPTY_LIMIT;
+  const endgameLimit = options.precise ? baseEndgameLimit + 2 : baseEndgameLimit;
+  let endgameAborted = false;
 
   const orderMoves = (moves: Candidate[], ply: number) => {
     return moves
@@ -173,6 +142,86 @@ export const searchBestMove = (
       .map((item) => item.move);
   };
 
+  const listAllMoves = (currentPlayer: Player, ply: number) => {
+    const moves: Candidate[] = [];
+    for (let idx = 0; idx < board.length; idx += 1) {
+      if (board[idx] !== 0) continue;
+      const x = idx % size;
+      const y = Math.floor(idx / size);
+      const evalInfo = evaluateMovePatternScore(board, size, x, y, currentPlayer);
+      moves.push({
+        x,
+        y,
+        score: evalInfo.totalScore
+      });
+    }
+    return orderMoves(moves, ply);
+  };
+
+  const solveEndgame = (
+    currentPlayer: Player,
+    depth: number,
+    alpha: number,
+    beta: number,
+    ply: number,
+    currentHash: number
+  ): { score: number; best?: Candidate } => {
+    if (performance.now() > deadline) {
+      endgameAborted = true;
+      return { score: evaluateBoard(board, size, currentPlayer) };
+    }
+
+    nodes += 1;
+    if (depth <= 0) return { score: 0 };
+
+    const keyedHash = (currentHash ^ TURN_SALT[currentPlayer - 1]) >>> 0;
+    const entry = table.get(keyedHash);
+    if (entry && entry.depth >= depth) {
+      if (entry.flag === "exact") return { score: entry.score, best: entry.best };
+      if (entry.flag === "lower") alpha = Math.max(alpha, entry.score);
+      if (entry.flag === "upper") beta = Math.min(beta, entry.score);
+      if (alpha >= beta) return { score: entry.score, best: entry.best };
+    }
+
+    const moves = listAllMoves(currentPlayer, ply);
+    if (!moves.length) return { score: 0 };
+
+    let bestScore = -Infinity;
+    let bestMove: Candidate | undefined;
+    const alphaOrig = alpha;
+
+    for (const move of moves) {
+      const idx = indexOf(move.x, move.y, size);
+      board[idx] = currentPlayer;
+      const nextHash = updateHash(currentHash, idx, currentPlayer, zobrist);
+      let score: number;
+      if (isImmediateWin(board, size, move.x, move.y, currentPlayer)) {
+        score = WIN_SCORE - ply;
+      } else {
+        score = -solveEndgame(otherPlayer(currentPlayer), depth - 1, -beta, -alpha, ply + 1, nextHash).score;
+      }
+      board[idx] = 0;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMove = move;
+      }
+      alpha = Math.max(alpha, score);
+      if (alpha >= beta) break;
+    }
+
+    const flag: TTEntry["flag"] =
+      bestScore <= alphaOrig ? "upper" : bestScore >= beta ? "lower" : "exact";
+    table.set(keyedHash, {
+      depth,
+      score: bestScore,
+      flag,
+      best: bestMove
+    });
+
+    return { score: bestScore, best: bestMove };
+  };
+
   const quiescence = (
     currentPlayer: Player,
     alpha: number,
@@ -193,9 +242,11 @@ export const searchBestMove = (
     if (depth <= 0) return { score: standPat };
 
     const mustBlocks = getMustBlockCellsForOpponentThreat(board, size, currentPlayer);
+    const quiescenceLimit = options.precise ? 18 : 12;
     const baseMoves = generateCandidates(board, size, currentPlayer, {
       difficulty: options.difficulty,
-      limit: 12
+      limit: quiescenceLimit,
+      precise: options.precise
     });
     const tacticalMoves = baseMoves.filter((m) => {
       const inMust = mustBlocks.some((c) => c.x === m.x && c.y === m.y);
@@ -237,7 +288,14 @@ export const searchBestMove = (
 
     nodes += 1;
     if (depth === 0) {
-      return quiescence(currentPlayer, alpha, beta, ply, currentHash, 4 - Math.min(3, ply));
+      const qBase = options.precise ? 6 : 4;
+      const qClamp = options.precise ? 4 : 3;
+      const threatBoost =
+        options.precise && countImmediateStrongThreats(board, size, otherPlayer(currentPlayer)) > 0
+          ? 1
+          : 0;
+      const qDepth = Math.max(0, qBase - Math.min(qClamp, ply) + threatBoost);
+      return quiescence(currentPlayer, alpha, beta, ply, currentHash, qDepth);
     }
 
     const keyedHash = (currentHash ^ TURN_SALT[currentPlayer - 1]) >>> 0;
@@ -250,7 +308,8 @@ export const searchBestMove = (
     }
 
     const candidates = generateCandidates(board, size, currentPlayer, {
-      difficulty: options.difficulty
+      difficulty: options.difficulty,
+      precise: options.precise
     });
     if (!candidates.length) {
       return { score: 0 };
@@ -270,7 +329,15 @@ export const searchBestMove = (
       if (isImmediateWin(board, size, move.x, move.y, currentPlayer)) {
         score = WIN_SCORE - ply;
       } else {
-        score = -negamax(otherPlayer(currentPlayer), depth - 1, -beta, -alpha, ply + 1, nextHash).score;
+        const extend =
+          options.precise &&
+          depth <= 2 &&
+          !!move.reason &&
+          (move.reason.includes("block") ||
+            move.reason.includes("four") ||
+            move.reason.includes("three"));
+        const nextDepth = depth - 1 + (extend ? 1 : 0);
+        score = -negamax(otherPlayer(currentPlayer), nextDepth, -beta, -alpha, ply + 1, nextHash).score;
       }
       board[idx] = 0;
 
@@ -327,6 +394,22 @@ export const searchBestMove = (
           scoreMap.set(key, prev);
         }
       }
+      const comboPivots = findComboThreatPivots(board, size, opp);
+      for (const cell of comboPivots) {
+        const key = `${cell.x},${cell.y}`;
+        const prev = scoreMap.get(key) ?? { score: 0, count: 0 };
+        prev.score += THREAT_SCORES.LIVE_FOUR + THREAT_SCORES.LIVE_THREE;
+        prev.count += 2;
+        scoreMap.set(key, prev);
+      }
+      const setupMoves = findTwoStepThreatSetups(board, size, opp);
+      for (const cell of setupMoves) {
+        const key = `${cell.x},${cell.y}`;
+        const prev = scoreMap.get(key) ?? { score: 0, count: 0 };
+        prev.score += THREAT_SCORES.LIVE_THREE;
+        prev.count += 1;
+        scoreMap.set(key, prev);
+      }
       let bestDef: Candidate | null = null;
       let bestScore = -Infinity;
       let bestCount = -Infinity;
@@ -336,14 +419,14 @@ export const searchBestMove = (
         const idx = indexOf(cell.x, cell.y, size);
         if (board[idx] !== 0) continue;
         const key = `${cell.x},${cell.y}`;
-      const info = scoreMap.get(key) ?? { score: 0, count: 0 };
-      // One-ply defensive lookahead: simulate our block and measure opponent's immediate threat strength
-      board[idx] = player;
-      const oppWins = getImmediateWins(board, size, opp).length;
-      const oppStrong = countImmediateStrongThreats(board, size, opp);
-      const oppScore = oppWins * WIN_SCORE + oppStrong * 1000;
-      board[idx] = 0;
-      const defensiveScore = info.score - oppScore; // higher is better for us
+        const info = scoreMap.get(key) ?? { score: 0, count: 0 };
+        // One-ply defensive lookahead: simulate our block and measure opponent's immediate threat strength
+        board[idx] = player;
+        const oppWins = getImmediateWins(board, size, opp).length;
+        const oppStrong = countImmediateStrongThreats(board, size, opp);
+        const oppScore = oppWins * WIN_SCORE + oppStrong * 1000;
+        board[idx] = 0;
+        const defensiveScore = info.score - oppScore; // higher is better for us
         const dist = Math.abs(cell.x - center) + Math.abs(cell.y - center);
         if (
           defensiveScore > bestScore ||
@@ -362,7 +445,7 @@ export const searchBestMove = (
     const oppLiveFourStarts = getLiveFourCreationPoints(board, size, otherPlayer(player));
     if (oppLiveFourStarts.length) {
       if (oppLiveFourStarts.length === 1) {
-        return { best: { ...oppLiveFourStarts[0], score: THREAT_SCORES.LIVE_FOUR - 2, reason: "block_live_four_setup" }, locked: true };
+        return { best: { ...oppLiveFourStarts[0], score: THREAT_SCORES.LIVE_FOUR - 2, reason: "block_live_four_setup" }, locked: false };
       }
       let bestDef: Candidate | null = null;
       let bestScore = Infinity;
@@ -377,7 +460,7 @@ export const searchBestMove = (
           bestDef = { x: cell.x, y: cell.y, score: THREAT_SCORES.LIVE_FOUR - 2, reason: "block_live_four_setup" };
         }
       }
-      if (bestDef) return { best: bestDef, locked: true };
+      if (bestDef) return { best: bestDef, locked: false };
     }
 
     const vcfAttack = runVCF(player);
@@ -415,6 +498,7 @@ export const searchBestMove = (
     const forkPivots = findForkPivotsForOpponent(board, size, player);
     const oppFourStarts = getFourCreationPoints(board, size, otherPlayer(player));
     const oppLiveThreeStarts = getLiveThreeCreationPoints(board, size, otherPlayer(player));
+    const oppSetupMoves = findTwoStepThreatSetups(board, size, otherPlayer(player));
 
     if (options.difficulty !== "hard") {
       // Multi-threat minimization: try defensive candidates that reduce opponent strong threats the most.
@@ -426,6 +510,7 @@ export const searchBestMove = (
       for (const c of oppLiveThreeEnds) defensePool.push({ x: c.x, y: c.y, score: THREAT_SCORES.LIVE_THREE, reason: "block_live_three_end" });
       for (const c of oppFourStarts) defensePool.push({ x: c.x, y: c.y, score: THREAT_SCORES.RUSH_FOUR, reason: "block_four_setup" });
       for (const c of oppLiveThreeStarts) defensePool.push({ x: c.x, y: c.y, score: THREAT_SCORES.LIVE_THREE, reason: "block_live_three_setup" });
+      for (const c of oppSetupMoves) defensePool.push({ x: c.x, y: c.y, score: THREAT_SCORES.LIVE_THREE - 50, reason: "block_setup_combo" });
       const unique = new Map<string, Candidate>();
       for (const d of defensePool) {
         unique.set(`${d.x},${d.y}`, { ...d, score: d.score ?? THREAT_SCORES.LIVE_THREE });
@@ -456,7 +541,11 @@ export const searchBestMove = (
   };
 
   const runVCF = (attacker: Player) => {
-    const maxDepth = 6;
+    const maxDepth = options.safetyDepth
+      ? Math.max(4, Math.min(12, options.safetyDepth))
+      : options.precise
+        ? 8
+        : 6;
     const defender = otherPlayer(attacker);
 
     const defenseMoves = (): Candidate[] => {
@@ -551,7 +640,11 @@ export const searchBestMove = (
   };
 
   const runVCT = (attacker: Player) => {
-    const maxDepth = 4;
+    const maxDepth = options.safetyDepth
+      ? Math.max(4, Math.min(8, Math.floor(options.safetyDepth * 0.6)))
+      : options.precise
+        ? 5
+        : 4;
     const defender = otherPlayer(attacker);
     const vctSearch = (
       current: Player,
@@ -564,9 +657,11 @@ export const searchBestMove = (
       }
       if (depth <= 0) return false;
 
+      const vctLimit = options.precise ? 18 : 12;
       const moves = generateCandidates(board, size, current, {
         difficulty: "hard",
-        limit: 12
+        limit: vctLimit,
+        precise: options.precise
       }).filter((m) => {
         return (
           m.reason?.includes("live_three") ||
@@ -607,6 +702,58 @@ export const searchBestMove = (
     const ok = vctSearch(attacker, maxDepth, hash);
     return ok ? bestVCFStart : null;
   };
+
+  const extractPV = (startPlayer: Player, startHash: number, maxPlies: number, firstMove?: Candidate) => {
+    const pv: PVStep[] = [];
+    const applied: number[] = [];
+    let currentPlayer = startPlayer;
+    let currentHash = startHash;
+    for (let ply = 0; ply < maxPlies; ply += 1) {
+      let move: Candidate | undefined;
+      if (ply === 0 && firstMove) {
+        move = firstMove;
+      } else {
+        const keyedHash = (currentHash ^ TURN_SALT[currentPlayer - 1]) >>> 0;
+        const entry = table.get(keyedHash);
+        if (!entry?.best) break;
+        move = entry.best;
+      }
+      const idx = indexOf(move.x, move.y, size);
+      if (board[idx] !== 0) break;
+      pv.push({ x: move.x, y: move.y, player: currentPlayer });
+      board[idx] = currentPlayer;
+      applied.push(idx);
+      currentHash = updateHash(currentHash, idx, currentPlayer, zobrist);
+      currentPlayer = otherPlayer(currentPlayer);
+    }
+    for (const idx of applied) {
+      board[idx] = 0;
+    }
+    return pv;
+  };
+
+  if (emptyCount <= endgameLimit) {
+    const result = solveEndgame(player, emptyCount, -Infinity, Infinity, 0, hash);
+    if (!endgameAborted && result.best) {
+      const durationMs = performance.now() - start;
+      const topK = generateCandidates(board, size, player, {
+        difficulty: options.difficulty,
+        precise: options.precise
+      })
+        .slice(0, 8)
+        .map((candidate) => ({ ...candidate }));
+      const pvLimit = options.precise ? 8 : 4;
+      const pv = extractPV(player, hash, pvLimit, result.best);
+      return {
+        bestMove: result.best,
+        topK,
+        pv,
+        depth: emptyCount,
+        nodes,
+        durationMs
+      };
+    }
+  }
 
   let best: Candidate | undefined;
   let depthReached = 0;
@@ -649,7 +796,8 @@ export const searchBestMove = (
     }
   };
 
-  if (!forcedLocked) {
+  const allowPvSearch = forcedLocked && options.precise;
+  if (!forcedLocked || allowPvSearch) {
     if (options.useIterative) {
       for (let depth = 1; depth <= options.maxDepth; depth += 1) {
         runDepth(depth);
@@ -660,15 +808,63 @@ export const searchBestMove = (
     }
   }
 
-  const durationMs = performance.now() - start;
-  const fallback = best ?? generateCandidates(board, size, player, { difficulty: options.difficulty })[0];
-  const topK = generateCandidates(board, size, player, { difficulty: options.difficulty })
+  const fallback =
+    best ??
+    generateCandidates(board, size, player, {
+      difficulty: options.difficulty,
+      precise: options.precise
+    })[0];
+  const topK = generateCandidates(board, size, player, {
+    difficulty: options.difficulty,
+    precise: options.precise
+  })
     .slice(0, 8)
     .map((candidate) => ({ ...candidate }));
 
+  const pickSafeMove = (primary: Candidate, candidates: Candidate[]) => {
+    if (!options.precise || options.difficulty !== "hard") return primary;
+    const safetyCache = new Map<string, boolean>();
+    const opponent = otherPlayer(player);
+    const isUnsafe = (cand: Candidate) => {
+      if (performance.now() > deadline) return false;
+      const key = `${cand.x},${cand.y}`;
+      const cached = safetyCache.get(key);
+      if (cached !== undefined) return cached;
+      const idx = indexOf(cand.x, cand.y, size);
+      if (board[idx] !== 0) {
+        safetyCache.set(key, false);
+        return false;
+      }
+      board[idx] = player;
+      const vcfThreat = runVCF(opponent);
+      let unsafe = !!vcfThreat;
+      if (!unsafe) {
+        const vctThreat = runVCT(opponent);
+        unsafe = !!vctThreat;
+      }
+      board[idx] = 0;
+      safetyCache.set(key, unsafe);
+      return unsafe;
+    };
+
+    if (!isUnsafe(primary)) return primary;
+    for (const cand of candidates.slice(0, 6)) {
+      if (!isUnsafe(cand)) {
+        return { ...cand, reason: cand.reason ?? "avoid_loss" };
+      }
+    }
+    return primary;
+  };
+
+  const bestMove = pickSafeMove(fallback, topK);
+  const pvLimit = options.precise ? 8 : 4;
+  const pv = extractPV(player, hash, pvLimit, bestMove);
+  const durationMs = performance.now() - start;
+
   return {
-    bestMove: fallback,
+    bestMove,
     topK,
+    pv,
     depth: depthReached || options.maxDepth,
     nodes,
     durationMs

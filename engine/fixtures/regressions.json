@@ -81,5 +81,23 @@
     ],
     "expectedAny": [{ "x": 7, "y": 5 }],
     "goal": "Bot (white) must stop black's four-three combo by playing 7,5."
+  },
+  {
+    "name": "four_three_pivot_6_6",
+    "size": 15,
+    "player": 2,
+    "moves": [
+      { "x": 6, "y": 6, "player": 1 },
+      { "x": 2, "y": 2, "player": 2 },
+      { "x": 7, "y": 7, "player": 1 },
+      { "x": 2, "y": 3, "player": 2 },
+      { "x": 8, "y": 8, "player": 1 },
+      { "x": 3, "y": 2, "player": 2 },
+      { "x": 5, "y": 6, "player": 1 },
+      { "x": 9, "y": 5, "player": 2 },
+      { "x": 5, "y": 7, "player": 1 }
+    ],
+    "expectedAny": [{ "x": 5, "y": 5 }],
+    "goal": "Bot (white) should block the four-three pivot at 6,6."
   }
 ]

@@ -1,0 +1,87 @@
+{
+  "size": 15,
+  "startPlayer": 1,
+  "moves": [
+    {
+      "kind": "move",
+      "x": 7,
+      "y": 7,
+      "player": 1,
+      "index": 96,
+      "moveNumber": 1,
+      "ts": 1700000000000
+    },
+    {
+      "kind": "move",
+      "x": 3,
+      "y": 3,
+      "player": 2,
+      "index": 32,
+      "moveNumber": 2,
+      "ts": 1700000001000
+    },
+    {
+      "kind": "move",
+      "x": 8,
+      "y": 8,
+      "player": 1,
+      "index": 112,
+      "moveNumber": 3,
+      "ts": 1700000002000
+    },
+    {
+      "kind": "move",
+      "x": 3,
+      "y": 4,
+      "player": 2,
+      "index": 47,
+      "moveNumber": 4,
+      "ts": 1700000003000
+    },
+    {
+      "kind": "move",
+      "x": 9,
+      "y": 9,
+      "player": 1,
+      "index": 128,
+      "moveNumber": 5,
+      "ts": 1700000004000
+    },
+    {
+      "kind": "move",
+      "x": 4,
+      "y": 3,
+      "player": 2,
+      "index": 33,
+      "moveNumber": 6,
+      "ts": 1700000005000
+    },
+    {
+      "kind": "move",
+      "x": 6,
+      "y": 7,
+      "player": 1,
+      "index": 95,
+      "moveNumber": 7,
+      "ts": 1700000006000
+    },
+    {
+      "kind": "move",
+      "x": 10,
+      "y": 6,
+      "player": 2,
+      "index": 84,
+      "moveNumber": 8,
+      "ts": 1700000007000
+    },
+    {
+      "kind": "move",
+      "x": 6,
+      "y": 8,
+      "player": 1,
+      "index": 110,
+      "moveNumber": 9,
+      "ts": 1700000008000
+    }
+  ]
+}

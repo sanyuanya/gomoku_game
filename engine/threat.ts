@@ -48,6 +48,149 @@ const classify = (total: number, openEnds: number): ThreatType | null => {
   return null;
 };
 
+const LINE_RADIUS = 4;
+
+type PatternMatch = {
+  type: ThreatType;
+  score: number;
+  start: number;
+  end: number;
+  pattern: string;
+};
+
+const GAP_PATTERNS: Array<{ pattern: string; type: ThreatType }> = [
+  { pattern: "0101110", type: "RUSH_FOUR" },
+  { pattern: "0111010", type: "RUSH_FOUR" },
+  { pattern: "0110110", type: "RUSH_FOUR" },
+  { pattern: "010110", type: "LIVE_THREE" },
+  { pattern: "011010", type: "LIVE_THREE" }
+];
+
+const buildLineWindow = (
+  board: ArrayLike<number>,
+  size: number,
+  x: number,
+  y: number,
+  player: Player,
+  dx: number,
+  dy: number
+) => {
+  const coords: Array<Coord | null> = [];
+  let line = "";
+  for (let offset = -LINE_RADIUS; offset <= LINE_RADIUS; offset += 1) {
+    const cx = x + dx * offset;
+    const cy = y + dy * offset;
+    if (!inBounds(cx, cy, size)) {
+      line += "2";
+      coords.push(null);
+      continue;
+    }
+    if (offset === 0) {
+      line += "1";
+      coords.push({ x: cx, y: cy });
+      continue;
+    }
+    const val = getCell(board, size, cx, cy);
+    if (val === 0) line += "0";
+    else if (val === player) line += "1";
+    else line += "2";
+    coords.push({ x: cx, y: cy });
+  }
+  return { line, coords };
+};
+
+const findBestPatternMatch = (line: string, centerIndex: number): PatternMatch | null => {
+  let best: PatternMatch | null = null;
+  for (const def of GAP_PATTERNS) {
+    const pattern = def.pattern;
+    let start = line.indexOf(pattern);
+    while (start !== -1) {
+      const end = start + pattern.length - 1;
+      if (centerIndex >= start && centerIndex <= end) {
+        const centerChar = pattern[centerIndex - start];
+        if (centerChar === "1") {
+          const score = THREAT_SCORES[def.type];
+          if (!best || score > best.score) {
+            best = { type: def.type, score, start, end, pattern };
+          }
+        }
+      }
+      start = line.indexOf(pattern, start + 1);
+    }
+  }
+  return best;
+};
+
+type LineThreat = {
+  type: ThreatType | null;
+  score: number;
+  openEnds: Coord[];
+};
+
+const analyzeLineThreat = (
+  board: ArrayLike<number>,
+  size: number,
+  x: number,
+  y: number,
+  player: Player,
+  dx: number,
+  dy: number
+): LineThreat => {
+  const left = countDir(board, size, x, y, -dx, -dy, player);
+  const right = countDir(board, size, x, y, dx, dy, player);
+  const total = left + right + 1;
+  const leftOpen = openEnd(board, size, x, y, -dx, -dy, left);
+  const rightOpen = openEnd(board, size, x, y, dx, dy, right);
+  const openEnds = (leftOpen ? 1 : 0) + (rightOpen ? 1 : 0);
+  const contigType = classify(total, openEnds);
+  let bestType = contigType;
+  let bestScore = contigType ? THREAT_SCORES[contigType] : 0;
+  let bestOpenEnds: Coord[] = [];
+  if (contigType === "LIVE_THREE") {
+    if (leftOpen) bestOpenEnds.push(leftOpen);
+    if (rightOpen) bestOpenEnds.push(rightOpen);
+  }
+
+  const { line, coords } = buildLineWindow(board, size, x, y, player, dx, dy);
+  const match = findBestPatternMatch(line, LINE_RADIUS);
+  if (match && match.score > bestScore) {
+    bestType = match.type;
+    bestScore = match.score;
+    bestOpenEnds = [];
+    if (bestType === "LIVE_THREE") {
+      const startCoord = coords[match.start];
+      const endCoord = coords[match.end];
+      if (startCoord && line[match.start] === "0") bestOpenEnds.push(startCoord);
+      if (endCoord && line[match.end] === "0") bestOpenEnds.push(endCoord);
+    }
+  }
+
+  return { type: bestType, score: bestScore, openEnds: bestOpenEnds };
+};
+
+export const evaluateMovePatternScore = (
+  board: ArrayLike<number>,
+  size: number,
+  x: number,
+  y: number,
+  player: Player
+) => {
+  let totalScore = 0;
+  let best: { type: ThreatType | null; score: number } = { type: null, score: 0 };
+  let secondBestScore = 0;
+  for (const { dx, dy } of DIRECTIONS) {
+    const info = analyzeLineThreat(board, size, x, y, player, dx, dy);
+    totalScore += info.score;
+    if (info.score > best.score) {
+      secondBestScore = best.score;
+      best = { type: info.type, score: info.score };
+    } else if (info.score > secondBestScore) {
+      secondBestScore = info.score;
+    }
+  }
+  return { totalScore, best, secondBestScore };
+};
+
 const buildLineCells = (x: number, y: number, dx: number, dy: number, size: number) => {
   const cells: Coord[] = [{ x, y }];
   for (let step = 1; step <= 4; step += 1) {
@@ -76,20 +219,14 @@ const buildThreat = (
   dy: number
 ): ThreatRoute | null => {
   if (getCell(board, size, x, y) !== 0) return null;
-  const left = countDir(board, size, x, y, -dx, -dy, player);
-  const right = countDir(board, size, x, y, dx, dy, player);
-  const total = left + right + 1;
-  const leftOpen = openEnd(board, size, x, y, -dx, -dy, left);
-  const rightOpen = openEnd(board, size, x, y, dx, dy, right);
-  const openEnds = (leftOpen ? 1 : 0) + (rightOpen ? 1 : 0);
-  const type = classify(total, openEnds);
+  const info = analyzeLineThreat(board, size, x, y, player, dx, dy);
+  const type = info.type;
   if (!type) return null;
   const mustBlockCells: Coord[] = [];
   if (type === "FIVE" || type === "LIVE_FOUR" || type === "RUSH_FOUR") {
     mustBlockCells.push({ x, y });
   } else if (type === "LIVE_THREE") {
-    if (leftOpen) mustBlockCells.push(leftOpen);
-    if (rightOpen) mustBlockCells.push(rightOpen);
+    mustBlockCells.push(...info.openEnds);
   } else if (type === "SLEEP_THREE") {
     mustBlockCells.push({ x, y });
   }
@@ -98,7 +235,7 @@ const buildThreat = (
     type,
     lineCells: buildLineCells(x, y, dx, dy, size),
     mustBlockCells: mustBlockCells.slice(0, 2),
-    score: THREAT_SCORES[type],
+    score: info.score,
     direction: { dx, dy }
   };
 };
@@ -216,33 +353,6 @@ export const getImmediateWins = (board: ArrayLike<number>, size: number, player:
 export const getImmediateBlocks = (board: ArrayLike<number>, size: number, player: Player) =>
   getImmediateWins(board, size, otherPlayer(player));
 
-const isLiveFourIfPlaced = (
-  board: ArrayLike<number>,
-  size: number,
-  x: number,
-  y: number,
-  player: Player
-) => {
-  let found = false;
-  for (const { dx, dy } of DIRECTIONS) {
-    const left = countDir(board, size, x, y, -dx, -dy, player);
-    const right = countDir(board, size, x, y, dx, dy, player);
-    const total = left + right + 1;
-    if (total !== 4) continue;
-    const leftOpen = inBounds(x - (left + 1) * dx, y - (left + 1) * dy, size)
-      ? getCell(board, size, x - (left + 1) * dx, y - (left + 1) * dy) === 0
-      : false;
-    const rightOpen = inBounds(x + (right + 1) * dx, y + (right + 1) * dy, size)
-      ? getCell(board, size, x + (right + 1) * dx, y + (right + 1) * dy) === 0
-      : false;
-    if (leftOpen && rightOpen) {
-      found = true;
-      break;
-    }
-  }
-  return found;
-};
-
 export const getLiveFourCreationPoints = (
   board: ArrayLike<number>,
   size: number,
@@ -254,8 +364,12 @@ export const getLiveFourCreationPoints = (
     for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
       if (getCell(board, size, x, y) !== 0) continue;
       if (!hasNeighbor(board, size, x, y, NEAR_DISTANCE)) continue;
-      if (isLiveFourIfPlaced(board, size, x, y, player)) {
-        points.push({ x, y });
+      for (const { dx, dy } of DIRECTIONS) {
+        const info = analyzeLineThreat(board, size, x, y, player, dx, dy);
+        if (info.type === "LIVE_FOUR") {
+          points.push({ x, y });
+          break;
+        }
       }
     }
   }
@@ -314,17 +428,8 @@ export const getLiveThreeCreationPoints = (
       if (getCell(board, size, x, y) !== 0) continue;
       if (!hasNeighbor(board, size, x, y, NEAR_DISTANCE)) continue;
       for (const { dx, dy } of DIRECTIONS) {
-        const left = countDir(board, size, x, y, -dx, -dy, player);
-        const right = countDir(board, size, x, y, dx, dy, player);
-        const total = left + right + 1;
-        if (total !== 3) continue;
-        const leftOpen = inBounds(x - (left + 1) * dx, y - (left + 1) * dy, size)
-          ? getCell(board, size, x - (left + 1) * dx, y - (left + 1) * dy) === 0
-          : false;
-        const rightOpen = inBounds(x + (right + 1) * dx, y + (right + 1) * dy, size)
-          ? getCell(board, size, x + (right + 1) * dx, y + (right + 1) * dy) === 0
-          : false;
-        if (leftOpen && rightOpen) {
+        const info = analyzeLineThreat(board, size, x, y, player, dx, dy);
+        if (info.type === "LIVE_THREE") {
           points.push({ x, y });
           break;
         }
@@ -346,17 +451,8 @@ export const getFourCreationPoints = (
       if (getCell(board, size, x, y) !== 0) continue;
       if (!hasNeighbor(board, size, x, y, NEAR_DISTANCE)) continue;
       for (const { dx, dy } of DIRECTIONS) {
-        const left = countDir(board, size, x, y, -dx, -dy, player);
-        const right = countDir(board, size, x, y, dx, dy, player);
-        const total = left + right + 1;
-        if (total !== 4) continue;
-        const leftOpen = inBounds(x - (left + 1) * dx, y - (left + 1) * dy, size)
-          ? getCell(board, size, x - (left + 1) * dx, y - (left + 1) * dy) === 0
-          : false;
-        const rightOpen = inBounds(x + (right + 1) * dx, y + (right + 1) * dy, size)
-          ? getCell(board, size, x + (right + 1) * dx, y + (right + 1) * dy) === 0
-          : false;
-        if (leftOpen || rightOpen) {
+        const info = analyzeLineThreat(board, size, x, y, player, dx, dy);
+        if (info.type === "LIVE_FOUR" || info.type === "RUSH_FOUR") {
           points.push({ x, y });
           break;
         }
@@ -379,18 +475,9 @@ export const findForkThreatMovesForOpponent = (
   const countStrongFoursAt = (x: number, y: number) => {
     let strong = 0;
     for (const { dx, dy } of DIRECTIONS) {
-      const left = countDir(board, size, x, y, -dx, -dy, opp);
-      const right = countDir(board, size, x, y, dx, dy, opp);
-      const total = left + right + 1;
-      if (total >= 5) return 2;
-      if (total !== 4) continue;
-      const leftOpen = inBounds(x - (left + 1) * dx, y - (left + 1) * dy, size)
-        ? getCell(board, size, x - (left + 1) * dx, y - (left + 1) * dy) === 0
-        : false;
-      const rightOpen = inBounds(x + (right + 1) * dx, y + (right + 1) * dy, size)
-        ? getCell(board, size, x + (right + 1) * dx, y + (right + 1) * dy) === 0
-        : false;
-      if (leftOpen || rightOpen) strong += 1;
+      const info = analyzeLineThreat(board, size, x, y, opp, dx, dy);
+      if (info.type === "FIVE") return 2;
+      if (info.type === "LIVE_FOUR" || info.type === "RUSH_FOUR") strong += 1;
       if (strong >= 2) return strong;
     }
     return strong;
@@ -428,31 +515,113 @@ export const findDoubleLiveThreePivotsForOpponent = (
     for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
       if (getCell(board, size, x, y) !== 0) continue;
       if (!hasNeighbor(board, size, x, y, NEAR_DISTANCE)) continue;
-      (board as any)[y * size + x] = opp;
       let liveThreeCount = 0;
       for (const { dx, dy } of DIRECTIONS) {
-        const left = countDir(board, size, x, y, -dx, -dy, opp);
-        const right = countDir(board, size, x, y, dx, dy, opp);
-        const total = left + right + 1;
-        if (total !== 3) continue;
-        const leftOpen = inBounds(x - (left + 1) * dx, y - (left + 1) * dy, size)
-          ? getCell(board, size, x - (left + 1) * dx, y - (left + 1) * dy) === 0
-          : false;
-        const rightOpen = inBounds(x + (right + 1) * dx, y + (right + 1) * dy, size)
-          ? getCell(board, size, x + (right + 1) * dx, y + (right + 1) * dy) === 0
-          : false;
-        if (leftOpen && rightOpen) {
+        const info = analyzeLineThreat(board, size, x, y, opp, dx, dy);
+        if (info.type === "LIVE_THREE") {
           liveThreeCount += 1;
           if (liveThreeCount >= 2) break;
         }
       }
-      (board as any)[y * size + x] = 0;
       if (liveThreeCount >= 2) {
         pivots.push({ x, y });
       }
     }
   }
   return pivots;
+};
+
+const countDirectionalThreatsAt = (
+  board: ArrayLike<number>,
+  size: number,
+  x: number,
+  y: number,
+  player: Player
+) => {
+  let liveThree = 0;
+  let strongFour = 0;
+  for (const { dx, dy } of DIRECTIONS) {
+    const info = analyzeLineThreat(board, size, x, y, player, dx, dy);
+    if (!info.type) continue;
+    if (info.type === "FIVE") continue;
+    if (info.type === "LIVE_FOUR" || info.type === "RUSH_FOUR") {
+      strongFour += 1;
+      continue;
+    }
+    if (info.type === "LIVE_THREE") {
+      liveThree += 1;
+    }
+  }
+  return { liveThree, strongFour };
+};
+
+export const findComboThreatPivots = (
+  board: ArrayLike<number>,
+  size: number,
+  player: Player
+) => {
+  const bounds = activeBounds(board, size);
+  const pivots: Coord[] = [];
+  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+      if (getCell(board, size, x, y) !== 0) continue;
+      if (!hasNeighbor(board, size, x, y, NEAR_DISTANCE)) continue;
+      const { liveThree, strongFour } = countDirectionalThreatsAt(board, size, x, y, player);
+      if ((strongFour >= 1 && liveThree >= 1) || liveThree >= 2) {
+        pivots.push({ x, y });
+      }
+    }
+  }
+  return pivots;
+};
+
+const hasComboOrForkPivot = (
+  board: ArrayLike<number>,
+  size: number,
+  player: Player
+) => {
+  const bounds = activeBounds(board, size);
+  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+      if (getCell(board, size, x, y) !== 0) continue;
+      if (!hasNeighbor(board, size, x, y, NEAR_DISTANCE)) continue;
+      const { liveThree, strongFour } = countDirectionalThreatsAt(board, size, x, y, player);
+      if (strongFour >= 2) return true;
+      if (strongFour >= 1 && liveThree >= 1) return true;
+      if (liveThree >= 2) return true;
+    }
+  }
+  return false;
+};
+
+export const findTwoStepThreatSetups = (
+  board: ArrayLike<number>,
+  size: number,
+  player: Player
+) => {
+  const bounds = activeBounds(board, size);
+  const setups: Coord[] = [];
+  const baseWins = getImmediateWins(board, size, player).length;
+  const baseLiveFour = getLiveFourCreationPoints(board, size, player).length;
+  const baseCombos = findComboThreatPivots(board, size, player).length;
+  const baseForks = findForkThreatMovesForOpponent(board, size, otherPlayer(player)).length;
+  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+      if (getCell(board, size, x, y) !== 0) continue;
+      if (!hasNeighbor(board, size, x, y, NEAR_DISTANCE)) continue;
+      const idx = y * size + x;
+      (board as any)[idx] = player;
+      const wins = getImmediateWins(board, size, player).length;
+      const liveFour = getLiveFourCreationPoints(board, size, player).length;
+      const combos = findComboThreatPivots(board, size, player).length;
+      const forks = findForkThreatMovesForOpponent(board, size, otherPlayer(player)).length;
+      (board as any)[idx] = 0;
+      if (wins > baseWins || liveFour > baseLiveFour || combos > baseCombos || forks > baseForks) {
+        setups.push({ x, y });
+      }
+    }
+  }
+  return setups;
 };
 
 export const countImmediateStrongThreats = (
@@ -463,7 +632,9 @@ export const countImmediateStrongThreats = (
   const wins = getImmediateWins(board, size, player);
   const liveFour = getLiveFourCreationPoints(board, size, player);
   const forks = findForkThreatMovesForOpponent(board, size, otherPlayer(player));
-  return wins.length + liveFour.length + forks.length;
+  const combos = findComboThreatPivots(board, size, player);
+  const setups = findTwoStepThreatSetups(board, size, player);
+  return wins.length + liveFour.length + forks.length + combos.length + setups.length;
 };
 
 export const getTopThreatRoutes = (
@@ -494,27 +665,21 @@ export const getMustBlockCellsForOpponentThreat = (
     }
   }
 
-  // One-ply defensive lookahead to catch broken shapes (jump three/four) and multi-branch threats.
-  // For each empty cell near active area, simulate opponent move and see if it creates immediate win
-  // or multiple strong threats that must be answered.
-  const bounds = activeBounds(board, size);
-  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
-    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
-      if (getCell(board, size, x, y) !== 0) continue;
-      if (!hasNeighbor(board, size, x, y, NEAR_DISTANCE)) continue;
-      // simulate opponent move
-      (board as any)[y * size + x] = opp;
-      const wins = getImmediateWins(board, size, opp);
-      const liveFour = getLiveFourCreationPoints(board, size, opp);
-      const strongCount = countImmediateStrongThreats(board, size, opp);
-      (board as any)[y * size + x] = 0;
-      if (wins.length > 0 || liveFour.length > 0 || strongCount >= 2) {
-        const key = `${x},${y}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          cells.push({ x, y });
-        }
-      }
+  const comboPivots = findComboThreatPivots(board, size, opp);
+  for (const cell of comboPivots) {
+    const key = `${cell.x},${cell.y}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      cells.push(cell);
+    }
+  }
+
+  const setupMoves = findTwoStepThreatSetups(board, size, opp);
+  for (const cell of setupMoves) {
+    const key = `${cell.x},${cell.y}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      cells.push(cell);
     }
   }
   return cells;

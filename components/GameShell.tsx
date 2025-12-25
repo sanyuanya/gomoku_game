@@ -48,7 +48,10 @@ const DEFAULT_SETTINGS: Settings = {
   humanPlayer: 1,
   forbiddenMoves: false,
   showThreats: true,
-  timeBudgetMs: 800
+  timeBudgetMs: 800,
+  precisionMode: false,
+  precisionDepth: 10,
+  safetyDepth: 8
 };
 
 const isEditableElement = (target: EventTarget | null) => {
@@ -72,6 +75,7 @@ export default function GameShell(props: GameShellProps = {}) {
     topK: Candidate[];
     player: Player;
     threats?: ThreatRoute[];
+    pv?: { x: number; y: number; player: Player }[];
   } | null>(null);
 
   const [rightPanelOpen, setRightPanelOpen] = React.useState(true);
@@ -210,8 +214,9 @@ export default function GameShell(props: GameShellProps = {}) {
           moves: GameAction[];
         };
         if (parsed?.settings) {
-          setSettings(parsed.settings);
-          rebuildFromMoves(parsed.settings, parsed.moves || []);
+          const merged = { ...DEFAULT_SETTINGS, ...parsed.settings };
+          setSettings(merged);
+          rebuildFromMoves(merged, parsed.moves || []);
           setHydrated(true);
           return;
         }
@@ -265,13 +270,23 @@ export default function GameShell(props: GameShellProps = {}) {
   }, []);
 
   const handleSettingsChange = (nextSettings: Settings) => {
+    const clamp = (value: number, min: number, max: number) =>
+      Math.min(max, Math.max(min, value));
+    const depthBounds =
+      nextSettings.boardSize === 19 ? { min: 6, max: 12 } : { min: 8, max: 14 };
+    const safeBounds = { min: 4, max: 12 };
+    const normalized: Settings = {
+      ...nextSettings,
+      precisionDepth: clamp(nextSettings.precisionDepth, depthBounds.min, depthBounds.max),
+      safetyDepth: clamp(nextSettings.safetyDepth, safeBounds.min, safeBounds.max)
+    };
     const shouldReset =
-      nextSettings.boardSize !== settings.boardSize ||
-      nextSettings.mode !== settings.mode ||
-      nextSettings.firstPlayer !== settings.firstPlayer ||
-      nextSettings.humanPlayer !== settings.humanPlayer;
-    setSettings(nextSettings);
-    if (shouldReset) resetGame(nextSettings);
+      normalized.boardSize !== settings.boardSize ||
+      normalized.mode !== settings.mode ||
+      normalized.firstPlayer !== settings.firstPlayer ||
+      normalized.humanPlayer !== settings.humanPlayer;
+    setSettings(normalized);
+    if (shouldReset) resetGame(normalized);
   };
 
   const handlePlace = React.useCallback(
@@ -439,11 +454,21 @@ export default function GameShell(props: GameShellProps = {}) {
       const { type, requestId, payload } = event.data as {
         type: string;
         requestId?: number;
-        payload?: { bestMove: Coord; topK: Candidate[]; keyThreats: ThreatRoute[] };
+        payload?: {
+          bestMove: Coord;
+          topK: Candidate[];
+          keyThreats: ThreatRoute[];
+          pv?: { x: number; y: number; player: Player }[];
+        };
       };
       if (type !== "bot-result" || requestId !== requestIdRef.current || !payload) return;
       setBotThinking(false);
-      setBotAnalysis({ topK: payload.topK, player: currentPlayer, threats: payload.keyThreats });
+      setBotAnalysis({
+        topK: payload.topK,
+        player: currentPlayer,
+        threats: payload.keyThreats,
+        pv: payload.pv
+      });
 
       if (winner || isDraw) return;
       if (settings.mode !== "human-bot") return;
@@ -509,7 +534,10 @@ export default function GameShell(props: GameShellProps = {}) {
       size: settings.boardSize,
       player: currentPlayer,
       difficulty: settings.difficulty,
-      timeBudgetMs: settings.timeBudgetMs
+      timeBudgetMs: settings.timeBudgetMs,
+      precisionMode: settings.precisionMode,
+      precisionDepth: settings.precisionDepth,
+      safetyDepth: settings.safetyDepth
     });
   }, [
     board,
@@ -522,6 +550,9 @@ export default function GameShell(props: GameShellProps = {}) {
     settings.boardSize,
     settings.difficulty,
     settings.mode,
+    settings.precisionDepth,
+    settings.precisionMode,
+    settings.safetyDepth,
     settings.timeBudgetMs,
     winner
   ]);
@@ -616,9 +647,17 @@ export default function GameShell(props: GameShellProps = {}) {
       return botAnalysis.topK;
     }
     return generateCandidates(displayState.board, settings.boardSize, displayState.currentPlayer, {
-      difficulty: settings.difficulty
+      difficulty: settings.difficulty,
+      precise: settings.precisionMode
     }).slice(0, 7);
-  }, [botAnalysis, displayState.board, displayState.currentPlayer, settings.boardSize, settings.difficulty]);
+  }, [
+    botAnalysis,
+    displayState.board,
+    displayState.currentPlayer,
+    settings.boardSize,
+    settings.difficulty,
+    settings.precisionMode
+  ]);
 
   const replayState = replay.pointer < moves.length;
 
@@ -750,6 +789,7 @@ export default function GameShell(props: GameShellProps = {}) {
               topK={analysisCandidates}
               threats={threatOverview}
               currentPlayer={displayState.currentPlayer}
+              pv={botAnalysis?.player === displayState.currentPlayer ? botAnalysis?.pv : undefined}
             />
           ) : (
             <ReplayPanel
@@ -826,6 +866,7 @@ export default function GameShell(props: GameShellProps = {}) {
                   topK={analysisCandidates}
                   threats={threatOverview}
                   currentPlayer={displayState.currentPlayer}
+                  pv={botAnalysis?.player === displayState.currentPlayer ? botAnalysis?.pv : undefined}
                 />
               ) : (
                 <ReplayPanel
